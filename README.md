@@ -1,4 +1,4 @@
-# Agent Orchestration Framework POC
+# Agent Orchestration Server POC
 
 A production-ready system for serving stateful agents with real-time communication, session persistence, and conversation memory.
 
