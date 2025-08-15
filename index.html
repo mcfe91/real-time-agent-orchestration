@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent System Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .chat-container {
+            border: 1px solid #ddd;
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+            background: #fafafa;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .user-message {
+            background: #007bff;
+            color: white;
+            text-align: right;
+        }
+        .agent-message {
+            background: #28a745;
+            color: white;
+        }
+        .system-message {
+            background: #6c757d;
+            color: white;
+            font-style: italic;
+        }
+        .event-message {
+            background: #ffc107;
+            color: black;
+            font-size: 0.9em;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"] {
+            width: 300px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Agent System Test Client</h1>
+        
+        <div class="controls">
+            <button id="createAgent">Create New Agent</button>
+            <input type="text" id="sessionInput" placeholder="Enter session ID to connect">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div id="sessionInfo" style="display: none;">
+            <p><strong>Session ID:</strong> <span id="currentSession"></span></p>
+            <p><strong>WebSocket URL:</strong> <span id="wsUrl"></span></p>
+        </div>
+        
+        <div class="chat-container" id="chatContainer">
+            <div class="system-message">Click "Create New Agent" or enter a session ID to connect</div>
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button id="sendBtn" disabled>Send</button>
+            <button id="clearBtn">Clear Chat</button>
+        </div>
+    </div>
+
+    <script>
+        class AgentClient {
+            constructor() {
+                this.ws = null;
+                this.sessionId = null;
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                document.getElementById('createAgent').addEventListener('click', () => this.createAgent());
+                document.getElementById('connectBtn').addEventListener('click', () => this.connect());
+                document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnect());
+                document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearChat());
+                
+                document.getElementById('messageInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') this.sendMessage();
+                });
+            }
+
+            async createAgent() {
+                try {
+                    this.addMessage('system', 'Creating new agent...');
+                    
+                    const response = await fetch('http://localhost:8000/agents', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            agent_type: 'example',
+                            config: { test: 'hello from web client' }
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    this.sessionId = data.session_id;
+                    
+                    document.getElementById('sessionInput').value = this.sessionId;
+                    this.addMessage('system', `Agent created! Session ID: ${this.sessionId}`);
+                    
+                    // Auto-connect to the new agent
+                    setTimeout(() => this.connect(), 1000);
+                    
+                } catch (error) {
+                    this.addMessage('system', `Error creating agent: ${error.message}`);
+                }
+            }
+
+            connect() {
+                const sessionId = document.getElementById('sessionInput').value.trim();
+                if (!sessionId) {
+                    alert('Please enter a session ID');
+                    return;
+                }
+
+                this.sessionId = sessionId;
+                const wsUrl = `ws://localhost:8000/ws/${sessionId}`;
+                
+                this.addMessage('system', `Connecting to ${wsUrl}...`);
+                
+                this.ws = new WebSocket(wsUrl);
+                
+                this.ws.onopen = () => {
+                    this.updateStatus('connected');
+                    this.addMessage('system', 'Connected! Loading session history...');
+                    document.getElementById('currentSession').textContent = sessionId;
+                    document.getElementById('wsUrl').textContent = wsUrl;
+                    document.getElementById('sessionInfo').style.display = 'block';
+                };
+                
+                this.ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    this.handleMessage(data);
+                };
+                
+                this.ws.onclose = () => {
+                    this.updateStatus('disconnected');
+                    this.addMessage('system', 'Connection closed');
+                };
+                
+                this.ws.onerror = (error) => {
+                    this.addMessage('system', `WebSocket error: ${error}`);
+                };
+            }
+
+            disconnect() {
+                if (this.ws) {
+                    this.ws.close();
+                    this.ws = null;
+                }
+                this.updateStatus('disconnected');
+                document.getElementById('sessionInfo').style.display = 'none';
+            }
+
+            sendMessage() {
+                const input = document.getElementById('messageInput');
+                const message = input.value.trim();
+                
+                if (!message || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+
+                const messageData = {
+                    content: message,
+                    timestamp: new Date().toISOString()
+                };
+
+                this.ws.send(JSON.stringify(messageData));
+                this.addMessage('user', message);
+                input.value = '';
+            }
+
+            handleMessage(data) {
+                switch (data.type) {
+                    case 'session_history':
+                        this.addMessage('system', `Loaded ${data.events.length} historical events`);
+                        data.events.forEach(event => {
+                            if (event.event_type === 'user_message') {
+                                this.addMessage('user', event.data.content || JSON.stringify(event.data));
+                            } else if (event.event_type === 'agent_response') {
+                                this.addMessage('agent', event.data.message || JSON.stringify(event.data));
+                            } else {
+                                this.addMessage('event', `${event.event_type}: ${JSON.stringify(event.data)}`);
+                            }
+                        });
+                        break;
+                        
+                    case 'agent_event':
+                        if (data.event === 'agent_response') {
+                            this.addMessage('agent', data.data.message || JSON.stringify(data.data));
+                        } else if (data.event === 'user_message') {
+                            // Don't display user messages from events - we already show them when user types
+                            return;  // ← Use return instead of break
+                        } else {
+                            this.addMessage('event', `${data.event}: ${JSON.stringify(data.data)}`);
+                        }
+                        break;
+                                            
+                    case 'status_change':
+                        this.addMessage('system', `Agent status: ${data.status}`);
+                        break;
+                        
+                    case 'message_received':
+                        // Just acknowledge, don't show
+                        break;
+                        
+                    case 'error':
+                        this.addMessage('system', `Error: ${data.message}`);
+                        break;
+                        
+                    default:
+                        this.addMessage('system', `Unknown message: ${JSON.stringify(data)}`);
+                }
+            }
+
+            addMessage(type, text) {
+                const container = document.getElementById('chatContainer');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}-message`;
+                
+                const timestamp = new Date().toLocaleTimeString();
+                messageDiv.innerHTML = `<strong>[${timestamp}]</strong> ${text}`;
+                
+                container.appendChild(messageDiv);
+                container.scrollTop = container.scrollHeight;
+            }
+
+            clearChat() {
+                document.getElementById('chatContainer').innerHTML = '';
+            }
+
+            updateStatus(status) {
+                const statusEl = document.getElementById('status');
+                const connectBtn = document.getElementById('connectBtn');
+                const disconnectBtn = document.getElementById('disconnectBtn');
+                const messageInput = document.getElementById('messageInput');
+                const sendBtn = document.getElementById('sendBtn');
+                
+                if (status === 'connected') {
+                    statusEl.textContent = 'Connected';
+                    statusEl.className = 'status connected';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    messageInput.disabled = false;
+                    sendBtn.disabled = false;
+                } else {
+                    statusEl.textContent = 'Disconnected';
+                    statusEl.className = 'status disconnected';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    messageInput.disabled = true;
+                    sendBtn.disabled = true;
+                }
+            }
+        }
+
+        // Initialize the client when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new AgentClient();
+        });
+    </script>
+</body>
+</html>
