@@ -1,6 +1,6 @@
 # Agent Orchestration Framework POC
 
-A production-ready system for building stateful agents with real-time communication, session persistence, and conversation memory.
+A production-ready system for serving stateful agents with real-time communication, session persistence, and conversation memory.
 
 ## Features
 
